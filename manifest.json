@@ -1,0 +1,12 @@
+{
+  "name": "moarlcode_api",
+  "version": "0.0.2",
+  "author": "uriee",
+  "description": "provide data for the moralcode app",
+  "license": "no license yet",
+  "main": "itzpapalotl.js",
+  "engines": {
+    "arangodb": "^3.0.0"
+  },
+  "defaultDocument": "index"
+}
