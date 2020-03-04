@@ -22,7 +22,11 @@
 */
   const filter = (obj)=> {
     if(typeof obj !== 'object' || obj == null || Object.keys(obj).length === 0) return '';
-    return Object.keys(obj).reduce((o,x)=> `${o}${(o !== 'filter' ? 'and ' : ' ')}${x}='${obj[x]}' `,'filter')
+    delete obj[""]
+    const enclose = (x) => x === 'true' || x === 'false' ? "" : "'"
+    const aql =  Object.keys(obj).reduce((o,x)=> `${o}${(o !== 'filter' ? 'and ' : ' ')}u.${x}==${enclose(obj[x])}${obj[x]}${enclose(obj[x])} `,'filter')
+    console.log("AQL:",aql,obj)
+    return aql
   };
   const AQLUserBoards = (id) => `FOR v IN 1..1 OUTBOUND ${id} onboard RETURN v`;
 
@@ -71,7 +75,7 @@
                 RETURN length`.toArray();      
       if (count < 5) {
         const exists = db._query(`for c in commandment filter c.text == "${commandment}" return c`).toArray()
-        const com = exists[0] ? exists[0]  : db._collection('commandment').save({text : commandment})
+        const com = exists[0] ? exists[0]  : db._collection('commandment').save({text: commandment, active: false, support: 1, unsupport: 0, usedby : 1})
         const I = db._collection('inboard').save({_from: com._id, _to: boardid})
       }else {
         res.throw(400, "there are allready 5 commandments in the board");
@@ -108,6 +112,56 @@
     'This implies JSON.'
   );
 
+
+  router.post('/support', function (req, res) { 
+    const { _id, uid } = req.body   
+    const userId = `users/${uid}`
+    let sign = 1
+    if (_id) {
+      const supported = db._query(`FOR u in support filter u._from == @_from  and u._to==@_to return u._id `,{_from: userId , _to: _id}).toArray[0] || false
+      console.log("nooosh:  ",supported, sign,_id,userId)
+      if (supported){
+        db._query(`FOR u in support filter u._from == @_from and u._to==@_to REMOVE u IN support `,{_from: userId , _to: _id})
+        sign = -1
+      }else{
+        const I = db._collection('support').save({_from: userId, _to: _id})
+      }
+      const updated = db._query(`FOR u IN commandment filter u._id == @_id update u WITH {support : u.support + @sign} in commandment return NEW`,{_id : _id, sign : sign})
+      res.json({ updated : updated })
+    }else{
+      res.throw(400, "Error in support commandment");
+    }
+  })
+  .summary("support Commandment")
+  .body(
+    joi.object().required(),
+    'This implies JSON.'
+  );
+
+  router.post('/unsupport', function (req, res) { 
+    const { _id, uid } = req.body   
+    const userId = `users/${uid}`    
+    let sign = 1
+    if (_id) {
+      const unsupported = db._query(`FOR u in unsupport filter u._from == @_from  and u._to==@_to return u._id `,{_from: userId , _to: _id}).toArray[0] || false
+      if (unsupported){
+        db._query(`FOR u in unsupport filter u._from == @_from and u._to==@_to REMOVE u IN unsupport `,{_from: userId , _to: _id})
+        sign = -1
+      }else{
+        const I = db._collection('unsupport').save({_from: userId, _to: _id})
+      }
+      const updated = db._query(`FOR u IN commandment filter u._id == @_id update u WITH {unsupport : u.unsupport + @sign} in commandment return NEW`,{_id : _id, sign : sign})
+      res.json({ updated : updated })
+    }else{
+      res.throw(400, "Error in unSupport commandment");
+    }
+  })
+  .summary("unSupport Commandment")
+  .body(
+    joi.object().required(),
+    'This implies JSON.'
+  );  
+
   router.post('/signup', function (req, res) {
      const newUser =  req.body
      const {UserUID,Identifier} = newUser
@@ -135,11 +189,19 @@
   
   router.get('/com', function (req, res) {
   const obj = req.queryParams  
+  const { orderby, offset, count }  = obj
   delete  obj.uid
-  const coms = db._query(`FOR u IN commandment ${filter(obj)} return u`).toArray();    
+  delete obj.orderby
+  delete obj.count
+  delete obj.offset
+  const orderBy = !!orderby ? `SORT u.${orderby} DESC ` : ''
+  const limit = !!count && !!offset ? `LIMIT ${offset},${count} ` : ''
+  const query =  `FOR u IN commandment ${filter(obj)} ${limit} return u`
+  console.log("QUERY: ",query)
+  const coms = db._query(query).toArray();    
     res.json({ commandments: coms });
   })
-  .summary("returns a random deity name");
+  .summary("returns Commandment List");
 
   router.get('/personal', function (req, res) {
     var data = db._query(AQLUserPersonalBoard(req.queryParams.uid)).toArray();
