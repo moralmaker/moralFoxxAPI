@@ -118,8 +118,9 @@
     const userId = `users/${uid}`
     let sign = 1
     if (_id) {
-      const supported = db._query(`FOR u in support filter u._from == @_from  and u._to==@_to return u._id `,{_from: userId , _to: _id}).toArray[0] || false
-      console.log("nooosh:  ",supported, sign,_id,userId)
+      const query = `FOR u in support filter u._from == '${userId}' and u._to == '${_id}' return u._id `
+      const supported = db._query(query).toArray()[0]
+      console.log("nooosh:  ",supported, sign, query)
       if (supported){
         db._query(`FOR u in support filter u._from == @_from and u._to==@_to REMOVE u IN support `,{_from: userId , _to: _id})
         sign = -1
@@ -143,7 +144,7 @@
     const userId = `users/${uid}`    
     let sign = 1
     if (_id) {
-      const unsupported = db._query(`FOR u in unsupport filter u._from == @_from  and u._to==@_to return u._id `,{_from: userId , _to: _id}).toArray[0] || false
+      const unsupported = db._query(`FOR u in unsupport filter u._from == @_from  and u._to == @_to return u._id `,{_from: userId , _to: _id}).toArray()[0] 
       if (unsupported){
         db._query(`FOR u in unsupport filter u._from == @_from and u._to==@_to REMOVE u IN unsupport `,{_from: userId , _to: _id})
         sign = -1
@@ -189,14 +190,49 @@
   
   router.get('/com', function (req, res) {
   const obj = req.queryParams  
-  const { orderby, offset, count }  = obj
+  const { orderby, offset, count, uid }  = obj
   delete  obj.uid
   delete obj.orderby
   delete obj.count
   delete obj.offset
   const orderBy = !!orderby ? `SORT u.${orderby} DESC ` : ''
   const limit = !!count && !!offset ? `LIMIT ${offset},${count} ` : ''
-  const query =  `FOR u IN commandment ${filter(obj)} ${limit} return u`
+  /*
+    const query =  `FOR u IN commandment ${filter(obj)} ${limit}
+                  LET Nsupport = (
+                    FOR s IN support 
+                      FILTER s._to == u._id
+                      RETURN s
+                    )
+                  LET supported = (
+                    FOR s IN Nsupport 
+                      FILTER s._from == 'users/${uid}' 
+                      RETURN s
+                    )                    
+                  LET Nunsupport = (
+                    FOR un IN unsupport 
+                      FILTER un._to == u._id
+                      RETURN un
+                    )  
+                  LET unsupported = (
+                    FOR un IN Nunsupport 
+                      FILTER un._from == 'users/${uid}' 
+                      RETURN un
+                    )                                      
+                  return { _id: u._id, text: u.text, author: u.author, support: LENGTH(Nsupport), unsupported: LENGTH(Nunsupport), supported: LENGTH(supported), unsupported: LENGTH(unsupported) } ` 
+                  */
+  const query =  `FOR u IN commandment ${filter(obj)} ${orderBy} ${limit}
+                  LET supported = (
+                    FOR s IN support 
+                      FILTER s._from == 'users/${uid}' and s._to == u._id
+                      RETURN s
+                    )
+                  LET unsupported = (
+                    FOR un IN unsupport 
+                      FILTER un._from == 'users/${uid}' and un._to == u._id
+                      RETURN un
+                    )                    
+                  return { _id: u._id, text: u.text, author: u.author, support: u.support, unsupport: u.unsupport, supported: LENGTH(supported), unsupported: LENGTH(unsupported)  } ` 
   console.log("QUERY: ",query)
   const coms = db._query(query).toArray();    
     res.json({ commandments: coms });
