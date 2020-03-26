@@ -68,11 +68,12 @@
     const {commandment, boardid, uid } = newC   
     if (commandment) {
       const user = `users/${uid}`
-      const count = query`FOR v,e,p IN 1..1 OUTBOUND ${user} onboard 
+      const aql = `FOR v,e,p IN 1..1 OUTBOUND '${user}' onboard 
                 FILTER p.edges[*].personal ALL == true
                 for x in inbound v._id inboard
                     COLLECT WITH COUNT INTO length
-                RETURN length`.toArray();      
+                RETURN length`
+      const count = db._query(aql).toArray();      
       if (count < 5) {
         const exists = db._query(`for c in commandment filter c.text == "${commandment}" return c`).toArray()
         const com = exists[0] ? exists[0]  : db._collection('commandment').save({text: commandment, active: false, support: 1, unsupport: 0, usedby : 1})
@@ -112,6 +113,107 @@
     'This implies JSON.'
   );
 
+router.post('/addb', function (req, res) {
+    const { name, latitude, longitude, radius, uid } = req.body
+    const user = `users/${uid}`
+    console.log("0:  ",  req.body) 
+    const aql = `for x in onboard
+                  filter x._from == '${user}'
+                  let c = (FOR y IN 1..1 OUTBOUND x._to inboard 
+                            COLLECT WITH COUNT INTO length
+                            RETURN length)
+                  return {personal : x, count : c}`
+     console.log("Count1:  ",aql)              
+    if (name && latitude && longitude && radius && uid) {
+      const {personal, count} = db._query(aql).toArray()[0];
+      console.log("Count:  ",count[0], name, latitude, longitude, radius, uid)    
+      if(count[0] < 5 ) {
+        const newBoard = db._collection('board').save(
+          
+        {
+          name,
+          personal: false,
+          members: 1,
+          location : {
+            type : 'Point',
+            'coordinates' : [latitude,longitude]
+          },
+          radius,
+        })
+       console.log("2222:   ",newBoard) 
+      db._collection('inboard').save(
+        {
+          _from: personal._to,
+          _to: newBoard._id
+        })
+      }else {
+        res.throw(400, "there are allready 5 public boards for this user");
+      }  
+    }else{
+      res.throw(400, "Error in NewBoard");
+    }
+  })
+  .summary("Add New Board")
+  .body(
+    joi.object().required(),
+    'This implies JSON.'
+  );  
+
+  router.post('/gob', function (req, res) {  
+    const { boardId, uid } = req.body   
+    const user = `users/${uid}`
+    const aql = `for x in onboard
+                  filter x._from == '${user}'
+                  let c = (FOR y IN 1..1 OUTBOUND x._to inboard 
+                            COLLECT WITH COUNT INTO length
+                            RETURN length)
+                  return {personal : x, count : c}`    
+    console.log("0:  ",boardId, uid, aql)                   
+    if (boardId && uid) {
+      const {personal, count} = db._query(aql).toArray()[0];
+      console.log("Count:  ",count, personal)    
+      if(count[0] < 5 ) {
+        const gob = db._collection('inboard').save(
+        {
+          _from : personal._to,
+          _to : boardId
+        })
+       console.log("2222:   ",gob) 
+      }else {
+        res.throw(400, "there are allready 5 public boards for this user");
+      }  
+    }else{
+      res.throw(400, "Error in NewBoard");
+    }
+  })
+  .summary("Get On Board")
+  .body(
+    joi.object().required(),
+    'This implies JSON.'
+  );  
+
+
+  router.post('/removeb', function (req, res) {
+    const newB =  req.body     
+    const { _from, _to } = newB   
+    if (_from && _to) {
+
+      const xxx = db._query(`FOR u IN onboard filter u._from == @_from and u._to == @_to remove u in onboard return OLD`,{_from: _from ,_to : _to }).toArray()  
+      const count = db._query(`for c in onboard filter c._to == @_to
+                                COLLECT WITH COUNT INTO cnt
+                                return cnt`,{_to: _to}).toArray()      
+      if (count && (count[0] <= 0)) db._query(`FOR u IN boards filter u._id == @_to and u.noDelete != true remove u in boards return OLD`,{_to: _to })
+
+      res.json({ removed : xxx })
+    }else{
+      res.throw(400, "Error in REMOVE Board");
+    }
+  })
+  .summary("Remove Board")
+  .body(
+    joi.object().required(),
+    'This implies JSON.'
+  );
 
   router.post('/support', function (req, res) { 
     const { _id, uid } = req.body   
@@ -197,30 +299,7 @@
   delete obj.offset
   const orderBy = !!orderby ? `SORT u.${orderby} DESC ` : ''
   const limit = !!count && !!offset ? `LIMIT ${offset},${count} ` : ''
-  /*
-    const query =  `FOR u IN commandment ${filter(obj)} ${limit}
-                  LET Nsupport = (
-                    FOR s IN support 
-                      FILTER s._to == u._id
-                      RETURN s
-                    )
-                  LET supported = (
-                    FOR s IN Nsupport 
-                      FILTER s._from == 'users/${uid}' 
-                      RETURN s
-                    )                    
-                  LET Nunsupport = (
-                    FOR un IN unsupport 
-                      FILTER un._to == u._id
-                      RETURN un
-                    )  
-                  LET unsupported = (
-                    FOR un IN Nunsupport 
-                      FILTER un._from == 'users/${uid}' 
-                      RETURN un
-                    )                                      
-                  return { _id: u._id, text: u.text, author: u.author, support: LENGTH(Nsupport), unsupported: LENGTH(Nunsupport), supported: LENGTH(supported), unsupported: LENGTH(unsupported) } ` 
-                  */
+
   const query =  `FOR u IN commandment ${filter(obj)} ${orderBy} ${limit}
                   LET supported = (
                     FOR s IN support 
@@ -238,6 +317,30 @@
     res.json({ commandments: coms });
   })
   .summary("returns Commandment List");
+
+  router.get('/geoBoards', function (req, res) {
+  const obj = req.queryParams  
+  const { bid, latitude, longitude, radius , uid }  = obj
+  delete obj.uid
+  if( !(latitude && longitude) ) res.throw(400, "Error in geoBoards parameters");
+  
+  const query = `LET point = GEO_POINT(${latitude},${longitude})
+                 FOR b IN board
+                   FILTER GEO_DISTANCE(point, b.location) <= ${radius || 2000}
+                   let c = (FOR y IN 2..2 INBOUND b._id inboard  
+                          collect com = y with count into cnt
+                          sort cnt desc
+                          return {_id :com._id,text : com.text, cnt :cnt}
+                          )
+                  let commandments = (for x in c limit 5 return x )                          
+                  RETURN {board :b ,commandments : commandments}`
+
+  console.log("QUERY: ",query)
+  const boards = db._query(query).toArray();    
+    res.json({ boards: boards });
+  })
+  .summary("returns Geo Boards List");
+
 
   router.get('/personal', function (req, res) {
     var data = db._query(AQLUserPersonalBoard(req.queryParams.uid)).toArray();
