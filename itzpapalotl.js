@@ -91,6 +91,35 @@
     'This implies JSON.'
   ); 
 
+  router.post('/addec', function (req, res) {
+    const {cid, uid } = req.body
+    const user = `users/${uid}`
+    console.log("0:  ",  req.body) 
+    const aql = `for x in onboard
+                  filter x._from == '${user}'
+                  let count = (FOR y IN 1..1 INBOUND x._to inboard 
+                    COLLECT WITH COUNT INTO length
+                    RETURN length)
+                  return {boardId : x._to, count : count}`
+     console.log("Count1:  ",aql)  
+    const {boardId, count} = db._query(aql).toArray()[0]   
+           console.log("Count2:  ",boardId,count[0]) 
+    if (cid && boardId) {
+      if(count[0] < 5) {
+        const I = db._collection('inboard').save({_from: cid, _to: boardId}) 
+      }else{
+        res.throw(400, "There are alrredy 5 commandments on the personal board.");
+      } 
+    }else{
+      res.throw(400, "There is no Commandment");
+    }
+  })
+  .summary("Add Existing Commandment to Board")
+  .body(
+    joi.object().required(),
+    'This implies JSON.'
+  );   
+
   router.post('/removec', function (req, res) {
     const newC =  req.body     
     const { _from, _to } = newC   
@@ -291,6 +320,33 @@ router.post('/addb', function (req, res) {
   );  
   
   router.get('/com', function (req, res) {
+  const obj = req.queryParams 
+  //obj.text = obj.text == '' ?  '$' : obj.text
+  const { orderby, offset, count, uid }  = obj
+  const orderBy = !!orderby ? `SORT u.${orderby} DESC ` : ''
+  const limit = !!count && !!offset ? `LIMIT ${offset},${count} ` : ''
+  const search2 = obj.text > '' ? ` SEARCH PHRASE(u.text, '${obj.text}', 'text_en') ` : ''
+  const search = obj.text > '' ? ` SEARCH ANALYZER(u.text IN TOKENS('${obj.text}', 'text_en'), 'text_en') SORT BM25(u) DESC ` : ''  
+  const query =  `FOR u IN com_v
+                  ${search} ${orderBy} ${limit} 
+                  LET supported = (
+                    FOR s IN support 
+                      FILTER s._from == 'users/${uid}' and s._to == u._id
+                      RETURN s
+                    )
+                  LET unsupported = (
+                    FOR un IN unsupport 
+                      FILTER un._from == 'users/${uid}' and un._to == u._id
+                      RETURN un
+                    )                    
+                  return { _id: u._id, text: u.text, author: u.author, support: u.support, unsupport: u.unsupport, supported: LENGTH(supported), unsupported: LENGTH(unsupported)  } ` 
+  console.log("QUERY: ",query)
+  const coms = db._query(query).toArray();    
+    res.json({ commandments: coms });
+  })
+  .summary("returns Commandment List");
+
+  router.get('/com2', function (req, res) {
   const obj = req.queryParams  
   const { orderby, offset, count, uid }  = obj
   delete  obj.uid
@@ -318,28 +374,73 @@ router.post('/addb', function (req, res) {
   })
   .summary("returns Commandment List");
 
+
   router.get('/geoBoards', function (req, res) {
   const obj = req.queryParams  
   const { bid, latitude, longitude, radius , uid }  = obj
   delete obj.uid
+  const user = `users/${uid}`
+  
   if( !(latitude && longitude) ) res.throw(400, "Error in geoBoards parameters");
   
   const query = `LET point = GEO_POINT(${latitude},${longitude})
                  FOR b IN board
                    FILTER GEO_DISTANCE(point, b.location) <= ${radius || 2000}
+
+                   let pboard = (for x in onboard
+                              filter x._from == '${user}'
+                              return x._to)[0]
+
+                   let p = (for y in inboard
+                                filter y._from == pboard && y._to == b._id 
+                                return true)
+
+                   let score = (for ub in 1..1 inbound b._id inboard
+                                    for corr in board_corr
+                                      filter corr._from == pboard && corr._to == ub._id
+                                      COLLECT AGGREGATE sc = avg(corr.corr[0])
+                                      return sc )
+
                    let c = (FOR y IN 2..2 INBOUND b._id inboard  
+                          collect com = y with count into cnt
+                          sort cnt desc
+                          return {_id :com._id,text : com.text, cnt :cnt})
+
+                  let commandments = (for x in c limit 5 return x )   
+
+                  RETURN {board :b ,commandments : commandments, onboard : p, score:score[0]}`
+
+  console.log("QUERY: ",query)
+  /*COLLECT AGGREGATE sc = SUM(corr.corr) */
+  const boards = db._query(query).toArray();    
+  const ubAQL = `for x in onboard
+                  filter x._from == '${user}'
+                  FOR b IN 1..1 OUTBOUND x._to inboard 
+                  let c = (FOR y IN 2..2 INBOUND b._id inboard  
                           collect com = y with count into cnt
                           sort cnt desc
                           return {_id :com._id,text : com.text, cnt :cnt}
                           )
-                  let commandments = (for x in c limit 5 return x )                          
-                  RETURN {board :b ,commandments : commandments}`
-
-  console.log("QUERY: ",query)
-  const boards = db._query(query).toArray();    
-    res.json({ boards: boards });
+                  let commandments = (for q in c limit 5 return q )                          
+                  RETURN {board :b ,commandments : commandments}` 
+  const userBoards = db._query(ubAQL).toArray();   
+    res.json({ geoBoards: boards, userBoards : userBoards });
   })
   .summary("returns Geo Boards List");
+
+
+  router.get('/getBoards', function (req, res) {
+  const obj = req.queryParams  
+  const { uid }  = obj
+  const user = `users/${uid}` 
+  const ubAQL = `for x in onboard
+                  filter x._from == '${user}'
+                  FOR y IN 1..1 OUTBOUND x._to inboard 
+                  return y ` 
+  const boards = db._query(ubAQL).toArray();    
+    res.json({ boards: boards });
+  })
+  .summary("returns users Boards List");
 
 
   router.get('/personal', function (req, res) {
@@ -355,4 +456,50 @@ router.post('/addb', function (req, res) {
   );  
 
 
+
+
+/* CALCULATE COMMENDMENTS CORRELATION    :
+for com in commandment
+    for p in inboard 
+        filter p._from == com._id
+        for g in inboard
+            filter g._to == p._to && g._from != com._id 
+            
+            UPSERT { _from: com._id , _to: g._from}
+                INSERT { _from: com._id , _to: g._from, corr: 990}
+                UPDATE {corr : OLD.corr + 990 }
+            IN commandment_corr  
+            RETURN g
+
+   CALCULATE USERS BOARDS CORRELATION    :
+for personal in board
+    filter has(personal,"of") //personal._from == "users/uxfdn43EfTg8AqkPbaGRr5RnXOk1"
+    LET pcom = (
+        FOR com IN 1..1 INBOUND personal._id inboard
+            RETURN com
+        )
+        filter pcom != []
+    for b in board
+        filter HAS(b,"of") && b._id != personal._id
+        
+        LET bcom = (
+        FOR com IN 1..1 INBOUND b._id inboard
+            RETURN com
+        )
+        filter bcom != []
+        
+        LET score = (
+            for pc in pcom
+                for bc in bcom
+                    for corr in commandment_corr
+                    filter corr._from == pc._id && corr._to == bc._id
+                    COLLECT AGGREGATE sc = sum(corr.corr)
+                    return sc
+                     
+        )
+        filter score[0] >  0 
+        INSERT { _from : personal._id , _to: b._id, corr: score} INTO board_corr  OPTIONS { overwrite: true }
+        return ({_from : personal._id , _to: b._id, pcom : pcom , bcom : bcom, score: score})
+        
+        */
 
