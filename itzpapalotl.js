@@ -2,8 +2,10 @@
 
   const createRouter = require('@arangodb/foxx/router');
   const router = createRouter();
+  module.context.use(router);  
 
-  module.context.use(router);
+  const queues = require("@arangodb/foxx/queues");
+  const run_script = queues.create("c_upd");  
 
   // include console module so we can log something (in the server's log)
   var console = require("console");
@@ -78,6 +80,13 @@
         const exists = db._query(`for c in commandment filter c.text == "${commandment}" return c`).toArray()
         const com = exists[0] ? exists[0]  : db._collection('commandment').save({text: commandment, active: false, support: 1, unsupport: 0, usedby : 1})
         const I = db._collection('inboard').save({_from: com._id, _to: boardid})
+        const c_key = (com._id).split('/')[1]
+        const xxx = db._query(`update { _key:@_key, upd : true } in commandment`,{_key:c_key }).toArray()   
+        run_script.push(
+            {
+              mount: module.context.mount, 
+              name: "c_corr"
+            },{})
       }else {
         res.throw(400, "there are allready 5 commandments in the board");
       }  
@@ -107,6 +116,10 @@
     if (cid && boardId) {
       if(count[0] < 5) {
         const I = db._collection('inboard').save({_from: cid, _to: boardId}) 
+        const _key = boardId.split('/')[1]
+        console.log('_key',_key)
+        const aql1 = `update { _key:@_key, upd : true } in board`
+        const xxx = db._query(aql1,{_key: _key }).toArray()  
       }else{
         res.throw(400, "There are alrredy 5 commandments on the personal board.");
       } 
@@ -124,8 +137,15 @@
     const newC =  req.body     
     const { _from, _to } = newC   
     if (_from && _to) {
-
-      const xxx = db._query(`FOR u IN inboard filter u._from == @_from and u._to == @_to remove u in inboard return OLD`,{_from: _from ,_to : _to }).toArray()  
+      const _key = _to.split('/')[1]
+      const aql1 = `FOR u IN inboard
+                filter u._from == @_from
+                and u._to == @_to
+                remove u in inboard
+                update { _key: @_key, upd : true } in board
+                return OLD`
+      const xxx = db._query(aql1,{_from: _from ,_to : _to ,_key: _key }).toArray()  
+//      const xxx = db._query(`FOR u IN inboard filter u._from == @_from and u._to == @_to remove u in inboard return OLD`,{_from: _from ,_to : _to }).toArray()  
       const count = db._query(`for c in inboard filter c._from == @_from
                                 COLLECT WITH COUNT INTO cnt
                                 return cnt`,{_from: _from}).toArray()      
@@ -223,17 +243,26 @@ router.post('/addb', function (req, res) {
 
 
   router.post('/removeb', function (req, res) {
-    const newB =  req.body     
-    const { _from, _to } = newB   
-    if (_from && _to) {
+    const board =  req.body     
+    const { uid, board_id } = board   
+    if (uid && board_id) {
+      const aql1 = `FOR ib in onboard filter ib._from == 'users/${uid}' 
+                      FOR u IN inboard                    
+                       filter u._from == ib._to and u._to == '${board_id}'
+                       remove u in inboard return OLD`
+      const aql2 =`for c in inboard filter c._to == '${board_id}'
+                     COLLECT WITH COUNT INTO cnt
+                     return cnt`                       
+      const aql3 = `FOR u IN boards
+                        filter u._id == '${board_id}' and u.noDelete != true
+                        remove u in boards return OLD
+                        return OLD.name`
+      const old =   db._query(aql1).toArray()[0]                 
+      const count = db._query(aql2).toArray()[0]
+      console.log("pop::",old,count)
+      if(count < 1 ) db._query(aql3)
 
-      const xxx = db._query(`FOR u IN onboard filter u._from == @_from and u._to == @_to remove u in onboard return OLD`,{_from: _from ,_to : _to }).toArray()  
-      const count = db._query(`for c in onboard filter c._to == @_to
-                                COLLECT WITH COUNT INTO cnt
-                                return cnt`,{_to: _to}).toArray()      
-      if (count && (count[0] <= 0)) db._query(`FOR u IN boards filter u._id == @_to and u.noDelete != true remove u in boards return OLD`,{_to: _to })
-
-      res.json({ removed : xxx })
+      res.json({ massage : `unBoarding board` })
     }else{
       res.throw(400, "Error in REMOVE Board");
     }
@@ -328,7 +357,7 @@ router.post('/addb', function (req, res) {
   const search2 = obj.text > '' ? ` SEARCH PHRASE(u.text, '${obj.text}', 'text_en') ` : ''
   const search = obj.text > '' ? ` SEARCH ANALYZER(u.text IN TOKENS('${obj.text}', 'text_en'), 'text_en') SORT BM25(u) DESC ` : ''  
   const query =  `FOR u IN com_v
-                  ${search} ${orderBy} ${limit} 
+                  ${search} ${obj.text === '' ? orderBy : ''} ${limit} 
                   LET supported = (
                     FOR s IN support 
                       FILTER s._from == 'users/${uid}' and s._to == u._id

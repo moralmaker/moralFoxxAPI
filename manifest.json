@@ -5,6 +5,10 @@
   "description": "provide data for the moralcode app",
   "license": "no license yet",
   "main": "itzpapalotl.js",
+  "scripts" : {
+    "b_corr" : "/b_corr.js",
+    "c_corr" : "/c_corr.js"    
+  },
   "engines": {
     "arangodb": "^3.0.0"
   },
