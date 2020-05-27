@@ -80,8 +80,13 @@
         const exists = db._query(`for c in commandment filter c.text == "${commandment}" return c`).toArray()
         const com = exists[0] ? exists[0]  : db._collection('commandment').save({text: commandment, active: false, support: 1, unsupport: 0, usedby : 1})
         const I = db._collection('inboard').save({_from: com._id, _to: boardid})
-        const c_key = (com._id).split('/')[1]
-        const xxx = db._query(`update { _key:@_key, upd : true } in commandment`,{_key:c_key }).toArray()   
+
+        const aql1 = `FOR c IN 1..1 INBOUND @_to inboard 
+                      update { _key: SPLIT( c._id ,"/")[1], upd : true } in commandment `      
+        const xx2 = db._query(aql1,{ _to: boardid }).toArray()          
+        //const c_key = (com._id).split('/')[1]
+        //const xxx = db._query(`update { _key:@_key, upd : true } in commandment`,{_key:c_key }).toArray()   
+        res.json({ added : xxx })
         run_script.push(
             {
               mount: module.context.mount, 
@@ -116,10 +121,19 @@
     if (cid && boardId) {
       if(count[0] < 5) {
         const I = db._collection('inboard').save({_from: cid, _to: boardId}) 
-        const _key = boardId.split('/')[1]
-        console.log('_key',_key)
-        const aql1 = `update { _key:@_key, upd : true } in board`
-        const xxx = db._query(aql1,{_key: _key }).toArray()  
+
+        const aql1 = `FOR c IN 1..1 INBOUND @_to inboard 
+                      update { _key: SPLIT( c._id ,"/")[1], upd : true } in commandment `      
+        const xx2 = db._query(aql1,{ _to: boardId }).toArray()        
+        //const _key = cid.split('/')[1]
+        //console.log('_key',_key)
+        //const xxx = db._query(`update { _key:@_key, upd : true } in commandment`,{_key: _key }).toArray()  
+        run_script.push(
+          {
+            mount: module.context.mount, 
+            name: "c_corr"
+          },{})
+        res.json({ added : xxx })
       }else{
         res.throw(400, "There are alrredy 5 commandments on the personal board.");
       } 
@@ -137,19 +151,30 @@
     const newC =  req.body     
     const { _from, _to } = newC   
     if (_from && _to) {
-      const _key = _to.split('/')[1]
-      const aql1 = `FOR u IN inboard
+ 
+      const aql1 = `FOR c IN 1..1 INBOUND @_to inboard 
+                      update { _key: SPLIT( c._id ,"/")[1], upd : true } in commandment `      
+
+      const aql2 = `FOR u IN inboard
                 filter u._from == @_from
                 and u._to == @_to
-                remove u in inboard
-                update { _key: @_key, upd : true } in board
-                return OLD`
-      const xxx = db._query(aql1,{_from: _from ,_to : _to ,_key: _key }).toArray()  
+                remove u in inboard            
+                return OLD`               
+
+      const xx2 = db._query(aql1,{ _to: _to }).toArray()                 
+      const xxx = db._query(aql2,{ _from: _from ,_to : _to  }).toArray()  
+
 //      const xxx = db._query(`FOR u IN inboard filter u._from == @_from and u._to == @_to remove u in inboard return OLD`,{_from: _from ,_to : _to }).toArray()  
       const count = db._query(`for c in inboard filter c._from == @_from
                                 COLLECT WITH COUNT INTO cnt
                                 return cnt`,{_from: _from}).toArray()      
       if (count && (count[0] <= 0)) db._query(`FOR u IN commandment filter u._id == @_from and u.noDelete != true remove u in commandment return OLD`,{_from: _from })
+
+      run_script.push(
+          {
+            mount: module.context.mount, 
+            name: "c_corr"
+          },{})  
 
       res.json({ removed : xxx })
     }else{

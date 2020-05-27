@@ -32,7 +32,7 @@ for personal in board
         UPDATE { corr: score } IN board_corr        
         return ({_from : personal._id , _to: b._id, pcom : pcom , bcom : bcom, score: score})`
         ).toArray() 
-
+console.log("middle b_corr")
 const second = db._query(`
 for personal in board
     filter personal.upd == true 
