@@ -378,7 +378,8 @@ router.post('/addb', function (req, res) {
   //obj.text = obj.text == '' ?  '$' : obj.text
   const { orderby, offset, count, uid }  = obj
   const orderBy = !!orderby ? `SORT u.${orderby} DESC ` : ''
-  const limit = !!count && !!offset ? `LIMIT ${offset},${count} ` : ''
+  console.log("oc:",offset,count)
+  const limit =  !!count && !!offset ? `LIMIT ${offset},${count} ` : ' limit 30 '
   const search2 = obj.text > '' ? ` SEARCH PHRASE(u.text, '${obj.text}', 'text_en') ` : ''
   const search = obj.text > '' ? ` SEARCH ANALYZER(u.text IN TOKENS('${obj.text}', 'text_en'), 'text_en') SORT BM25(u) DESC ` : ''  
   const query =  `FOR u IN com_v

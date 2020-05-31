@@ -19,7 +19,7 @@ const clear =db._query(`
     `)
 const pboards =db._query(`
     for i in 1..500
-        insert {_key: CONCAT('mockp', i), name: concat('mock_g:',i), of : concat('mock_g:',i), upd: true, mock: true} into board
+        insert {_key: CONCAT('mockp', i), name: concat('mock_g:',i), of : concat('mock_g:',i), mock: true} into board
         return i
     `)
 const gboards =db._query(`
@@ -29,13 +29,13 @@ const gboards =db._query(`
     `)
 console.log("mock commandment")
 const commandments = db._query(`
-    for i in 1..1000
+    for i in 1..150
         insert {_key: concat('mock:',i), text: concat('mock:',i), support: 0, unsupport: 0, upd: true,   mock: true} into commandment
         return i
     `)
 
 console.log("mock inboard 900")
-for (var i =0;i < 900; i++) {
+for (var i =0;i < 2200; i++) {
     const { cid,bid } = db._query(`   
             let bid = (FOR b IN board
                 filter has(b,"of")
@@ -60,12 +60,19 @@ for (var i =0;i < 900; i++) {
 
 console.log("run c_corr")
 
-
+const corr = db._query(`
+    for x in commandment
+        filter x.mock == true
+        insert {_from : x._id, _to : x._id, corr: 100, mock: true} into commandment_corr
+        return x
+    `) 
+console.log("run c_corr2",corr.length,corr)
+/*
 run_script.push(
     {
       mount: module.context.mount, 
       name: "c_corr"
     },{})
-
+*/
 console.log("end mock")
 //TODO: feed the second query with the output of the first        
