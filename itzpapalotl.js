@@ -32,13 +32,13 @@
   };
   const AQLUserBoards = (id) => `FOR v IN 1..1 OUTBOUND ${id} onboard RETURN v`;
 
+
   const AQLUserPersonalBoard = (id) => `FOR v,e,p IN 1..1 OUTBOUND "users/${id}" onboard 
-  FILTER p.edges[*].personal ALL == true
   for x in inbound v._id inboard
   RETURN {board : {id: v._id, name : v.name}, commandment : {id: x._id, text: x.text, author: x.author}}`;
 
   const AQLUserPersonalOnlyBoard = (id) => `FOR v,e,p IN 1..1 OUTBOUND "users/${id}" onboard 
-  FILTER p.edges[*].personal ALL == true
+
   RETURN {board : {id: v._id, name : v.name}}`;
 
   const AQLBoardCommandments = (id) => `FOR v IN 1..1 INBOUND ${id} inboard RETURN v`;
@@ -67,11 +67,11 @@
 
   router.post('/addc', function (req, res) {
     const newC =  req.body    
-    const {commandment, boardid, uid } = newC   
+    const {commandment, boardid, uid } = newC 
+    console.log("DEKLTE ME:",boardid)  
     if (commandment) {
       const user = `users/${uid}`
-      const aql = `FOR v,e,p IN 1..1 OUTBOUND '${user}' onboard 
-                FILTER p.edges[*].personal ALL == true
+      const aql = `FOR v IN 1..1 OUTBOUND '${user}' onboard 
                 for x in inbound v._id inboard
                     COLLECT WITH COUNT INTO length
                 RETURN length`
@@ -86,7 +86,7 @@
         const xx2 = db._query(aql1,{ _to: boardid }).toArray()          
         //const c_key = (com._id).split('/')[1]
         //const xxx = db._query(`update { _key:@_key, upd : true } in commandment`,{_key:c_key }).toArray()   
-        res.json({ added : xxx })
+        res.json({ text : 'good' })
         run_script.push(
             {
               mount: module.context.mount, 
@@ -202,11 +202,10 @@ router.post('/addb', function (req, res) {
       const {personal, count} = db._query(aql).toArray()[0];
       console.log("Count:  ",count[0], name, latitude, longitude, radius, uid)    
       if(count[0] < 5 ) {
-        const newBoard = db._collection('board').save(
+        const newBoard = db._collection('gboard').save(
           
         {
           name,
-          personal: false,
           members: 1,
           location : {
             type : 'Point',
@@ -278,9 +277,9 @@ router.post('/addb', function (req, res) {
       const aql2 =`for c in inboard filter c._to == '${board_id}'
                      COLLECT WITH COUNT INTO cnt
                      return cnt`                       
-      const aql3 = `FOR u IN boards
+      const aql3 = `FOR u IN gboard
                         filter u._id == '${board_id}' and u.noDelete != true
-                        remove u in boards return OLD
+                        remove u in gboard return OLD
                         return OLD.name`
       const old =   db._query(aql1).toArray()[0]                 
       const count = db._query(aql2).toArray()[0]
@@ -353,11 +352,12 @@ router.post('/addb', function (req, res) {
      const {UserUID,Identifier} = newUser
      delete newUser.UserUID
      newUser._key = UserUID
+     newUser.tour = {personal: false, com: false, geo: false}
      if (Identifier && UserUID) {
        const exists = db._query(`FOR u IN users FILTER u._key=='${UserUID}' AND u.Identifier=='${Identifier}' return u`).toArray()    
        if (!exists[0]) {
          const user = db._collection('users').save(newUser)
-         const board = db._collection('board').save({name: 'Personal Board', of: Identifier})
+         const board = db._collection('pboard').save({name: Identifier, of: Identifier})
          const connect = db._collection('onboard').save({_from: user._id , _to: board._id, personal : true})
          res.json(201,{user : user})
        }else{
@@ -371,7 +371,22 @@ router.post('/addb', function (req, res) {
   .body(
     joi.object().required(),
     'This implies JSON.'
-  );  
+  ); 
+
+  router.post('/tour', function (req, res) {
+    const { tour,uid } = req.body
+    const aql1 = `FOR u IN users
+                    filter u._key == '${uid}' 
+                      update u with {tour : tour} in users `      
+    
+    const xx2 = db._query(aql1).toArray()      
+    xx2 ? res.json(201,{message : 'tour data excepted'}) : res.throw(400, "tour faulty data")
+  })
+  .summary("SignUp - opens new user and the user's personal board")
+  .body(
+    joi.object().required(),
+    'This implies JSON.'
+  ); 
   
   router.get('/com', function (req, res) {
   const obj = req.queryParams 
@@ -439,7 +454,8 @@ router.post('/addb', function (req, res) {
   if( !(latitude && longitude) ) res.throw(400, "Error in geoBoards parameters");
   
   const query = `LET point = GEO_POINT(${latitude},${longitude})
-                 FOR b IN board
+                 FOR b IN gboard
+                   filter has(b,"location") 
                    FILTER GEO_DISTANCE(point, b.location) <= ${radius || 2000}
 
                    let pboard = (for x in onboard
@@ -453,7 +469,7 @@ router.post('/addb', function (req, res) {
                    let score = (for ub in 1..1 inbound b._id inboard
                                     for corr in board_corr
                                       filter corr._from == pboard && corr._to == ub._id
-                                      COLLECT AGGREGATE sc = avg(corr.corr[0])
+                                      COLLECT AGGREGATE sc = avg(corr.corr)
                                       return sc )
 
                    let c = (FOR y IN 2..2 INBOUND b._id inboard  
@@ -500,6 +516,7 @@ router.post('/addb', function (req, res) {
 
   router.get('/personal', function (req, res) {
     var data = db._query(AQLUserPersonalBoard(req.queryParams.uid)).toArray();
+    console.log("pppp:",data)
     if (!data[0]) {
       data = db._query(AQLUserPersonalOnlyBoard(req.queryParams.uid)).toArray();
     }

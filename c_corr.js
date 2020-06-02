@@ -6,17 +6,11 @@ const pre = db._query(`
 for com in commandment
     filter com.upd == true 
     for x in commandment_corr
-        filter x._from == com._id
+        filter x._from != x._to && x._from == com._id
         remove {_key : x._key } in commandment_corr
         return true`).toArray()
 console.log("start c_corr 2")
 
-const corr = db._query(`
-    for x in commandment
-        filter x.mock == true
-        insert {_from : x._id, _to : x._id, corr: 100, mock: true} into commandment_corr
-        return x
-    `)
 console.log("after")    
 const com = db._query(`
 for com in commandment
@@ -61,7 +55,7 @@ const boards = db._query(`
 for com in commandment
     filter com.upd == true 
     for p in 1..1 OUTBOUND com._id inboard 
-        update {_key: SPLIT( p._id,"/")[1] , upd :true} in board
+        update {_key: SPLIT( p._id,"/")[1] , upd :true} in pboard
         return true`).toArray()
 console.log("start c_corr 4")
 

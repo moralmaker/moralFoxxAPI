@@ -1,7 +1,7 @@
 const { db } = require("@arangodb");
 console.log("start b_corr")
 const bc = db._query(`
-    for personal in board
+    for personal in pboard
     filter personal.upd == true 
     LET pcom = (
         FOR com1 IN 1..1 INBOUND personal._id inboard
@@ -35,7 +35,7 @@ const bc = db._query(`
             return ({from : personal._id , to: b._id, score: score[0]})    
     `).toArray()
 
-console.log("lll:",bc.length)
+
 for(i=0 ;i < bc.length ;i++) {
 //console.log("lll:",bc[i])
  db._query(`
@@ -82,17 +82,17 @@ for personal in board
         ).toArray() 
         */
 console.log("middle b_corr")
-/*
+
 const clean1 = db._query(`
 for c in commandment
     filter c.upd == true 
     update {_key : c._key, upd: false } in commandment
     return true`).toArray()
 const clean2 = db._query(`
-for personal in board
+for personal in pboard
     filter personal.upd == true 
-    update {_key : personal._key, upd: false } in board
+    update {_key : personal._key, upd: false } in pboard
     return true`).toArray()
-*/
+
 console.log("end b_corr")
 //TODO: feed the second query with the output of the first        
