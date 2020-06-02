@@ -30,20 +30,13 @@
     console.log("AQL:",aql,obj)
     return aql
   };
-  const AQLUserBoards = (id) => `FOR v IN 1..1 OUTBOUND ${id} onboard RETURN v`;
 
+  const AQLPersOnalboard = (id) => `for p in pboard filter p._key == "${id}"
+                                          for c in inbound p._id inboard
+  RETURN {board : {id: p._id, name : p.name}, commandment : {id: c._id, text: c.text, author: c.author}}`;
 
-  const AQLUserPersonalBoard = (id) => `FOR v,e,p IN 1..1 OUTBOUND "users/${id}" onboard 
-  for x in inbound v._id inboard
-  RETURN {board : {id: v._id, name : v.name}, commandment : {id: x._id, text: x.text, author: x.author}}`;
+  const AQLPersOnalonlyBoard = (id) => `FOR p IN pboard filter p._key == "${id}" RETURN {board : {id: p._id, name : p.name}}`;
 
-  const AQLUserPersonalOnlyBoard = (id) => `FOR v,e,p IN 1..1 OUTBOUND "users/${id}" onboard 
-
-  RETURN {board : {id: v._id, name : v.name}}`;
-
-  const AQLBoardCommandments = (id) => `FOR v IN 1..1 INBOUND ${id} inboard RETURN v`;
-
- 
  module.context.use(function auth(req, res, next) {
     let obj = !req.rawBody ? req.queryParams : req.rawBody
     obj = !req.rawBody ? obj : JSON.parse(req.rawBody)
@@ -55,7 +48,7 @@
       next(err) 
     }   
     uid = uid || {}
-    const user = db._query(`FOR u IN users FILTER u._key == @uid return u`,{uid : uid}).toArray()    
+    const user = db._query(`FOR u IN pboard FILTER u._key == @uid return u`,{uid : uid}).toArray()    
     const isAuth = user[0] ? true : false   
       if (!isAuth)  {
         res.send('Not authenticated');
@@ -70,8 +63,7 @@
     const {commandment, boardid, uid } = newC 
     console.log("DEKLTE ME:",boardid)  
     if (commandment) {
-      const user = `users/${uid}`
-      const aql = `FOR v IN 1..1 OUTBOUND '${user}' onboard 
+      const aql = `FOR v IN pboard filter v._key == '${uid}' 
                 for x in inbound v._id inboard
                     COLLECT WITH COUNT INTO length
                 RETURN length`
@@ -107,10 +99,8 @@
 
   router.post('/addec', function (req, res) {
     const {cid, uid } = req.body
-    const user = `users/${uid}`
     console.log("0:  ",  req.body) 
-    const aql = `for x in onboard
-                  filter x._from == '${user}'
+    const aql = `for x in pboard  filter x._key == '${uid}'
                   let count = (FOR y IN 1..1 INBOUND x._to inboard 
                     COLLECT WITH COUNT INTO length
                     RETURN length)
@@ -189,11 +179,9 @@
 
 router.post('/addb', function (req, res) {
     const { name, latitude, longitude, radius, uid } = req.body
-    const user = `users/${uid}`
     console.log("0:  ",  req.body) 
-    const aql = `for x in onboard
-                  filter x._from == '${user}'
-                  let c = (FOR y IN 1..1 OUTBOUND x._to inboard 
+    const aql = `for x in pboard filter x._key == '${uid}'
+                  let c = (FOR y IN 1..1 OUTBOUND x._id inboard 
                             COLLECT WITH COUNT INTO length
                             RETURN length)
                   return {personal : x, count : c}`
@@ -234,10 +222,8 @@ router.post('/addb', function (req, res) {
 
   router.post('/gob', function (req, res) {  
     const { boardId, uid } = req.body   
-    const user = `users/${uid}`
-    const aql = `for x in onboard
-                  filter x._from == '${user}'
-                  let c = (FOR y IN 1..1 OUTBOUND x._to inboard 
+    const aql = `for x in pboard filter x._key == '${uid}'
+                  let c = (FOR y IN 1..1 OUTBOUND x._id inboard 
                             COLLECT WITH COUNT INTO length
                             RETURN length)
                   return {personal : x, count : c}`    
@@ -270,9 +256,9 @@ router.post('/addb', function (req, res) {
     const board =  req.body     
     const { uid, board_id } = board   
     if (uid && board_id) {
-      const aql1 = `FOR ib in onboard filter ib._from == 'users/${uid}' 
+      const aql1 = `FOR x in pboard filter x._key == '${uid}' 
                       FOR u IN inboard                    
-                       filter u._from == ib._to and u._to == '${board_id}'
+                       filter u._from == x._id and u._to == '${board_id}'
                        remove u in inboard return OLD`
       const aql2 =`for c in inboard filter c._to == '${board_id}'
                      COLLECT WITH COUNT INTO cnt
@@ -299,7 +285,7 @@ router.post('/addb', function (req, res) {
 
   router.post('/support', function (req, res) { 
     const { _id, uid } = req.body   
-    const userId = `users/${uid}`
+    const userId = `pboard/${uid}`
     let sign = 1
     if (_id) {
       const query = `FOR u in support filter u._from == '${userId}' and u._to == '${_id}' return u._id `
@@ -325,7 +311,7 @@ router.post('/addb', function (req, res) {
 
   router.post('/unsupport', function (req, res) { 
     const { _id, uid } = req.body   
-    const userId = `users/${uid}`    
+    const userId = `pboard/${uid}`    
     let sign = 1
     if (_id) {
       const unsupported = db._query(`FOR u in unsupport filter u._from == @_from  and u._to == @_to return u._id `,{_from: userId , _to: _id}).toArray()[0] 
@@ -350,15 +336,13 @@ router.post('/addb', function (req, res) {
   router.post('/signup', function (req, res) {
      const newUser =  req.body
      const {UserUID,Identifier} = newUser
-     delete newUser.UserUID
-     newUser._key = UserUID
-     newUser.tour = {personal: false, com: false, geo: false}
+
      if (Identifier && UserUID) {
-       const exists = db._query(`FOR u IN users FILTER u._key=='${UserUID}' AND u.Identifier=='${Identifier}' return u`).toArray()    
+       const exists = db._query(`FOR u IN pboard FILTER u._key=='${UserUID}' AND u.Identifier=='${Identifier}' return u`).toArray()    
        if (!exists[0]) {
-         const user = db._collection('users').save(newUser)
-         const board = db._collection('pboard').save({name: Identifier, of: Identifier})
-         const connect = db._collection('onboard').save({_from: user._id , _to: board._id, personal : true})
+         //const user = db._collection('users').save(newUser)
+         const user = db._collection('pboard').save({_key :UserUID, name: Identifier, of: Identifier ,tour : {personal: false, com: false, geo: false}})
+
          res.json(201,{user : user})
        }else{
         res.throw(400, "A user with the same Email allready exists");
@@ -375,9 +359,9 @@ router.post('/addb', function (req, res) {
 
   router.post('/tour', function (req, res) {
     const { tour,uid } = req.body
-    const aql1 = `FOR u IN users
+    const aql1 = `FOR u IN pboard
                     filter u._key == '${uid}' 
-                      update u with {tour : tour} in users `      
+                      update u with {tour : tour} in pboard `      
     
     const xx2 = db._query(aql1).toArray()      
     xx2 ? res.json(201,{message : 'tour data excepted'}) : res.throw(400, "tour faulty data")
@@ -401,12 +385,12 @@ router.post('/addb', function (req, res) {
                   ${search} ${obj.text === '' ? orderBy : ''} ${limit} 
                   LET supported = (
                     FOR s IN support 
-                      FILTER s._from == 'users/${uid}' and s._to == u._id
+                      FILTER s._from == 'pboard/${uid}' and s._to == u._id
                       RETURN s
                     )
                   LET unsupported = (
                     FOR un IN unsupport 
-                      FILTER un._from == 'users/${uid}' and un._to == u._id
+                      FILTER un._from == 'pboard/${uid}' and un._to == u._id
                       RETURN un
                     )                    
                   return { _id: u._id, text: u.text, author: u.author, support: u.support, unsupport: u.unsupport, supported: LENGTH(supported), unsupported: LENGTH(unsupported)  } ` 
@@ -429,12 +413,12 @@ router.post('/addb', function (req, res) {
   const query =  `FOR u IN commandment ${filter(obj)} ${orderBy} ${limit}
                   LET supported = (
                     FOR s IN support 
-                      FILTER s._from == 'users/${uid}' and s._to == u._id
+                      FILTER s._from == 'pboard/${uid}' and s._to == u._id
                       RETURN s
                     )
                   LET unsupported = (
                     FOR un IN unsupport 
-                      FILTER un._from == 'users/${uid}' and un._to == u._id
+                      FILTER un._from == 'pboard/${uid}' and un._to == u._id
                       RETURN un
                     )                    
                   return { _id: u._id, text: u.text, author: u.author, support: u.support, unsupport: u.unsupport, supported: LENGTH(supported), unsupported: LENGTH(unsupported)  } ` 
@@ -449,7 +433,6 @@ router.post('/addb', function (req, res) {
   const obj = req.queryParams  
   const { bid, latitude, longitude, radius , uid }  = obj
   delete obj.uid
-  const user = `users/${uid}`
   
   if( !(latitude && longitude) ) res.throw(400, "Error in geoBoards parameters");
   
@@ -458,9 +441,8 @@ router.post('/addb', function (req, res) {
                    filter has(b,"location") 
                    FILTER GEO_DISTANCE(point, b.location) <= ${radius || 2000}
 
-                   let pboard = (for x in onboard
-                              filter x._from == '${user}'
-                              return x._to)[0]
+                   let pboard = (for x in pboard filter x._key == '${uid}'
+                                return x._id)[0]
 
                    let p = (for y in inboard
                                 filter y._from == pboard && y._to == b._id 
@@ -484,9 +466,8 @@ router.post('/addb', function (req, res) {
   console.log("QUERY: ",query)
   /*COLLECT AGGREGATE sc = SUM(corr.corr) */
   const boards = db._query(query).toArray();    
-  const ubAQL = `for x in onboard
-                  filter x._from == '${user}'
-                  FOR b IN 1..1 OUTBOUND x._to inboard 
+  const ubAQL = `for x in pboard filter x._key == '${uid}'
+                  FOR b IN 1..1 OUTBOUND x._id inboard 
                   let c = (FOR y IN 2..2 INBOUND b._id inboard  
                           collect com = y with count into cnt
                           sort cnt desc
@@ -503,10 +484,8 @@ router.post('/addb', function (req, res) {
   router.get('/getBoards', function (req, res) {
   const obj = req.queryParams  
   const { uid }  = obj
-  const user = `users/${uid}` 
-  const ubAQL = `for x in onboard
-                  filter x._from == '${user}'
-                  FOR y IN 1..1 OUTBOUND x._to inboard 
+  const ubAQL = `for x in pboard filter x._key == '${uid}'
+                  FOR y IN 1..1 OUTBOUND x._id inboard 
                   return y ` 
   const boards = db._query(ubAQL).toArray();    
     res.json({ boards: boards });
@@ -515,10 +494,10 @@ router.post('/addb', function (req, res) {
 
 
   router.get('/personal', function (req, res) {
-    var data = db._query(AQLUserPersonalBoard(req.queryParams.uid)).toArray();
+    var data = db._query(AQLPersOnalboard(req.queryParams.uid)).toArray();
     console.log("pppp:",data)
     if (!data[0]) {
-      data = db._query(AQLUserPersonalOnlyBoard(req.queryParams.uid)).toArray();
+      data = db._query(AQLPersOnalonlyBoard(req.queryParams.uid)).toArray();
     }
     res.status(200).json({data: data});
   })
